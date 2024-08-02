@@ -1,10 +1,25 @@
+<!-- eslint-disable -->
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cesium</title>
   </head>
   <body>
     <div id="cesiumContainer"></div>
     <script type="module" src="/src/main.js"></script>
+    <div class="tolerance_form">
+      <div>
+        <label for="">Tolerance</label>
+        <input type="number" id="tolerance_input" />
+      </div>
+      <div>
+        <label for="">Point</label>
+        <input type="text" id="point_length" readonly />
+      </div>
+      <button id="export_json">JSON추출</button>
+    </div>
   </body>
 </html>
+<!-- eslint-enable -->
