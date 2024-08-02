@@ -15,7 +15,13 @@ const viewer = new Viewer("cesiumContainer", {
 });
 
 let geoData;
-let propertiesData;
+const propertiesData = [];
+
+let properties;
+let koreaData;
+let newCoord = [];
+//let searchBar = document.querySelector(".cesium-geocoder-input");
+const searchBar = document.getElementById("search");
 const toleranceInput = document.getElementById("tolerance_input");
 const exportJson = document.getElementById("export_json");
 const pointLength = document.getElementById("point_length");
@@ -25,11 +31,16 @@ let tolerance = 0.0005;
 async function getGeo() {
   try {
     const response = await axios.get("../public/manan.geojson");
+    const response2 = await axios.get("../public/korea.geojson");
+    koreaData = response2.data.features;
     geoData = response.data[0].geometry.coordinates[0];
-    propertiesData = response.data[0];
-    console.log(response.data[0]);
 
-    drawLine();
+    for (let i = 0; i < koreaData.length; i++) {
+      propertiesData.push(response2.data.features[i]);
+    }
+
+    // 기본 안양시 만안구
+    drawLine(geoData);
   } catch (error) {
     console.error(error);
   }
@@ -40,14 +51,62 @@ toleranceInput.value = tolerance;
 toleranceInput.addEventListener("change", function (e) {
   tolerance = e.target.value;
   viewer.entities.removeAll();
-  drawLine();
+  for (let i = 0; i < koreaData.length; i++) {
+    const includesGu = koreaData[i].properties.SIG_KOR_NM;
+
+    if (searchBar.value === includesGu) {
+      drawLine(koreaData[i].geometry.coordinates[0]);
+    }
+  }
 });
 
-async function drawLine() {
+searchBar.addEventListener("change", function () {
+  for (let i = 0; i < koreaData.length; i++) {
+    const includesGu = koreaData[i].properties.SIG_KOR_NM;
+    try {
+      if (searchBar.value === includesGu) {
+        viewer.entities.removeAll();
+
+        // MultiPolygon일 때 배열 하나로 합치기
+        if (koreaData[i].geometry.type === "MultiPolygon") {
+          newCoord = [
+            koreaData[i].geometry.coordinates[0].flat(),
+            koreaData[i].geometry.coordinates[1].flat(),
+          ];
+          drawLine(newCoord.flat());
+        } else {
+          drawLine(koreaData[i].geometry.coordinates[0]);
+        }
+      }
+    } catch (error) {
+      console.log(error);
+    }
+  }
+});
+
+// json 추출
+exportJson.addEventListener("click", function () {
+  const filename = "data.geojson";
+  const jsonStr = JSON.stringify(newJson);
+
+  const element = document.createElement("a");
+  element.setAttribute(
+    "href",
+    `data:text/plain;charset=utf-8,${encodeURIComponent(jsonStr)}`,
+  );
+  element.setAttribute("download", filename);
+
+  element.style.display = "none";
+  document.body.appendChild(element);
+
+  element.click();
+});
+
+async function drawLine(data) {
   // 경계선의 위도와 경도 좌표 (예시 좌표)
   const boundaryCoordinates = [];
-  for (let i = 0; i < geoData.length; i++) {
-    boundaryCoordinates.push({ lat: geoData[i][1], lon: geoData[i][0] });
+  for (let i = 0; i < data.length; i++) {
+    boundaryCoordinates.push({ lat: data[i][1], lon: data[i][0] });
   }
 
   const points = boundaryCoordinates.map((coord) => ({
@@ -70,29 +129,18 @@ async function drawLine() {
 
   pointLength.value = positions.length;
 
-  newJson.push({
-    type: propertiesData.type,
-    properties: propertiesData.properties,
-    geometry: { type: "Polygon", coordinates: [simplifiedCoordinates] },
-  });
-  console.log(newJson);
-  // json 추출
-  exportJson.addEventListener("click", function () {
-    const filename = "data.geojson";
-    const jsonStr = JSON.stringify(newJson);
+  for (let i = 0; i < propertiesData.length; i++) {
+    const includesGu = propertiesData[i].properties.SIG_KOR_NM;
 
-    const element = document.createElement("a");
-    element.setAttribute(
-      "href",
-      `data:text/plain;charset=utf-8,${encodeURIComponent(jsonStr)}`,
-    );
-    element.setAttribute("download", filename);
-
-    element.style.display = "none";
-    document.body.appendChild(element);
-
-    element.click();
-  });
+    if (searchBar.value === includesGu) {
+      properties = propertiesData[i].properties;
+      newJson.push({
+        type: propertiesData[i].type,
+        properties: properties,
+        geometry: { type: "Polygon", coordinates: [simplifiedCoordinates] },
+      });
+    }
+  }
 
   // 폴리라인 엔티티 추가
   viewer.entities.add({
