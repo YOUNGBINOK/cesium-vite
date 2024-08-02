@@ -19,8 +19,8 @@ let propertiesData;
 const toleranceInput = document.getElementById("tolerance_input");
 const exportJson = document.getElementById("export_json");
 const pointLength = document.getElementById("point_length");
-let tolerance = 0.0005;
 const newJson = [];
+let tolerance = 0.0005;
 
 async function getGeo() {
   try {
@@ -73,7 +73,7 @@ async function drawLine() {
   newJson.push({
     type: propertiesData.type,
     properties: propertiesData.properties,
-    geometry: { type: "Polygon", coordinates: simplifiedCoordinates },
+    geometry: { type: "Polygon", coordinates: [simplifiedCoordinates] },
   });
   console.log(newJson);
   // json 추출
