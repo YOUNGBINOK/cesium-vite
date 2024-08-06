@@ -15,32 +15,34 @@ const viewer = new Viewer("cesiumContainer", {
 });
 
 let geoData;
-const propertiesData = [];
-
-let properties;
-let koreaData;
-let newCoord = [];
-//let searchBar = document.querySelector(".cesium-geocoder-input");
+let tolerance = 0.0005;
+let newJson = [];
 const searchBar = document.getElementById("search");
 const toleranceInput = document.getElementById("tolerance_input");
 const exportJson = document.getElementById("export_json");
 const pointLength = document.getElementById("point_length");
-const newJson = [];
-let tolerance = 0.0005;
 
 async function getGeo() {
   try {
-    const response = await axios.get("../public/manan.geojson");
-    const response2 = await axios.get("../public/korea.geojson");
-    koreaData = response2.data.features;
-    geoData = response.data[0].geometry.coordinates[0];
+    const response = await axios.get("../public/jangan_0.0005.geojson");
+    //const response = await axios.get("../public/jangan_0.001.geojson");
 
-    for (let i = 0; i < koreaData.length; i++) {
-      propertiesData.push(response2.data.features[i]);
-    }
+    geoData = response.data.features;
 
-    // 기본 안양시 만안구
-    drawLine(geoData);
+    const promises = geoData.map(async (feature) => {
+      if (feature.geometry.type === "MultiPolygon") {
+        const mergedCoordinates = mergeMultiPolygonCoordinates(
+          feature.geometry.coordinates,
+        );
+        await drawLine(mergedCoordinates, feature.properties);
+      } else {
+        await drawLine(feature.geometry.coordinates[0], feature.properties);
+      }
+    });
+
+    const results = await Promise.all(promises);
+    newJson = results.filter((result) => result !== null);
+    console.log(newJson);
   } catch (error) {
     console.error(error);
   }
@@ -48,35 +50,55 @@ async function getGeo() {
 getGeo();
 
 toleranceInput.value = tolerance;
-toleranceInput.addEventListener("change", function (e) {
-  tolerance = e.target.value;
+toleranceInput.addEventListener("change", async function (e) {
+  tolerance = Number(e.target.value);
   viewer.entities.removeAll();
-  for (let i = 0; i < koreaData.length; i++) {
-    const includesGu = koreaData[i].properties.SIG_KOR_NM;
+  newJson = []; // 변경 시 새로운 데이터를 추가하기 전에 기존 데이터를 초기화
 
-    if (searchBar.value === includesGu) {
-      drawLine(koreaData[i].geometry.coordinates[0]);
+  const promises = geoData.map(async (feature) => {
+    if (feature.geometry.type === "MultiPolygon") {
+      const mergedCoordinates = mergeMultiPolygonCoordinates(
+        feature.geometry.coordinates,
+      );
+      await drawLine(mergedCoordinates, feature.properties);
+    } else {
+      await drawLine(feature.geometry.coordinates[0], feature.properties);
     }
-  }
+  });
+
+  const results = await Promise.all(promises);
+  newJson = results.filter((result) => result !== null);
+  console.log(newJson);
 });
 
-searchBar.addEventListener("change", function () {
-  for (let i = 0; i < koreaData.length; i++) {
-    const includesGu = koreaData[i].properties.SIG_KOR_NM;
+searchBar.addEventListener("change", async function () {
+  for (let i = 0; i < geoData.length; i++) {
+    const includesGu = geoData[i].properties.CTP_KOR_NM;
+
     try {
       if (searchBar.value === includesGu) {
         viewer.entities.removeAll();
+        newJson = []; // 기존 데이터를 초기화
 
-        // MultiPolygon일 때 배열 하나로 합치기
-        if (koreaData[i].geometry.type === "MultiPolygon") {
-          newCoord = [
-            koreaData[i].geometry.coordinates[0].flat(),
-            koreaData[i].geometry.coordinates[1].flat(),
-          ];
-          drawLine(newCoord.flat());
+        let result;
+        if (geoData[i].geometry.type === "MultiPolygon") {
+          const mergedCoordinates = mergeMultiPolygonCoordinates(
+            geoData[i].geometry.coordinates,
+          );
+          result = await drawLine(mergedCoordinates, geoData[i].properties);
         } else {
-          drawLine(koreaData[i].geometry.coordinates[0]);
+          result = await drawLine(
+            geoData[i].geometry.coordinates[0],
+            geoData[i].properties,
+          );
         }
+
+        if (result !== null) {
+          newJson.push(result);
+        }
+
+        console.log(newJson);
+        break;
       }
     } catch (error) {
       console.log(error);
@@ -84,7 +106,68 @@ searchBar.addEventListener("change", function () {
   }
 });
 
-// json 추출
+async function drawLine(data, properties) {
+  try {
+    const boundaryCoordinates = [];
+    for (let i = 0; i < data.length; i++) {
+      boundaryCoordinates.push({ lat: data[i][1], lon: data[i][0] });
+    }
+
+    const points = boundaryCoordinates.map((coord) => ({
+      x: coord.lon,
+      y: coord.lat,
+    }));
+
+    const simplifiedPoints = simplify(points, tolerance, true);
+
+    const simplifiedCoordinates = simplifiedPoints.map((point) => [
+      point.x,
+      point.y,
+    ]);
+
+    const positions = simplifiedCoordinates.map((coord) =>
+      Cartesian3.fromDegrees(coord[0], coord[1], 400),
+    );
+
+    pointLength.value = positions.length;
+
+    viewer.entities.add({
+      polygon: {
+        hierarchy: positions,
+        height: 3000,
+        material: Color.BLUE.withAlpha(0.5),
+        outline: true,
+        outlineColor: Color.SKYBLUE,
+      },
+    });
+
+    viewer.zoomTo(viewer.entities);
+
+    // 새로운 좌표와 속성을 반환
+    return {
+      type: "Feature",
+      properties: properties,
+      geometry: {
+        type: "Polygon",
+        coordinates: [simplifiedCoordinates],
+      },
+    };
+  } catch (error) {
+    console.log(error);
+    return null;
+  }
+}
+
+function mergeMultiPolygonCoordinates(coordinates) {
+  const merged = [];
+  for (let i = 0; i < coordinates.length; i++) {
+    for (let j = 0; j < coordinates[i].length; j++) {
+      merged.push(...coordinates[i][j]);
+    }
+  }
+  return merged;
+}
+
 exportJson.addEventListener("click", function () {
   const filename = "data.geojson";
   const jsonStr = JSON.stringify(newJson);
@@ -101,61 +184,6 @@ exportJson.addEventListener("click", function () {
 
   element.click();
 });
-
-async function drawLine(data) {
-  // 경계선의 위도와 경도 좌표 (예시 좌표)
-  const boundaryCoordinates = [];
-  for (let i = 0; i < data.length; i++) {
-    boundaryCoordinates.push({ lat: data[i][1], lon: data[i][0] });
-  }
-
-  const points = boundaryCoordinates.map((coord) => ({
-    x: coord.lon,
-    y: coord.lat,
-  }));
-
-  const simplifiedPoints = simplify(points, Number(tolerance), true);
-
-  // simplify.js 형식에서 Cesium 형식으로 변환
-  const simplifiedCoordinates = simplifiedPoints.map((point) => [
-    point.x,
-    point.y,
-  ]);
-
-  // 경계선을 그리기 위한 좌표 배열 생성
-  const positions = simplifiedCoordinates.map((coord) =>
-    Cartesian3.fromDegrees(coord[0], coord[1], 400),
-  );
-
-  pointLength.value = positions.length;
-
-  for (let i = 0; i < propertiesData.length; i++) {
-    const includesGu = propertiesData[i].properties.SIG_KOR_NM;
-
-    if (searchBar.value === includesGu) {
-      properties = propertiesData[i].properties;
-      newJson.push({
-        type: propertiesData[i].type,
-        properties: properties,
-        geometry: { type: "Polygon", coordinates: [simplifiedCoordinates] },
-      });
-    }
-  }
-
-  // 폴리라인 엔티티 추가
-  viewer.entities.add({
-    polygon: {
-      hierarchy: positions,
-      height: 500,
-      material: Color.BLUE.withAlpha(0.5),
-      outline: true,
-      outlineColor: Color.SKYBLUE,
-    },
-  });
-
-  // 초기 위치 및 줌 설정
-  viewer.zoomTo(viewer.entities);
-}
 
 createOsmBuildingsAsync().then((buildingTileset) => {
   viewer.scene.primitives.add(buildingTileset);
